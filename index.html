@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FLSA Shift Planner · Fairfax FRD</title>
+  <meta name="description" content="Plan shifts, leave and hireback to maximize pay — Fairfax County Fire & Rescue 24-hour shift (A/B/C)." />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23c8102e'/><path d='M33 10c2 9 12 13 12 26a13 13 0 0 1-26 0c0-7 4-11 7-14 0 5 2 8 5 8-1-8 0-14 2-20z' fill='white'/></svg>" />
+  <script>
+    // Apply theme before paint to avoid a flash.
+    (function () {
+      try {
+        var s = JSON.parse(localStorage.getItem('flsa-planner-v1') || '{}');
+        var t = s.theme || 'auto';
+        if (t === 'auto') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body data-tab="calendar">
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><path d="M33 8c2 9 13 14 13 28a14 14 0 0 1-28 0c0-8 4-12 8-15 0 5 2 9 5 9-1-8 0-15 2-22z" fill="currentColor"/></svg>
+      </span>
+      <div>
+        <h1>FLSA Shift Planner</h1>
+        <p class="sub">Fairfax County Fire &amp; Rescue · 24-hour shift</p>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="seg" role="radiogroup" aria-label="Your shift" id="shift-seg">
+        <button role="radio" data-shift="A" class="shift-a">A</button>
+        <button role="radio" data-shift="B" class="shift-b">B</button>
+        <button role="radio" data-shift="C" class="shift-c">C</button>
+      </div>
+      <label class="field-inline">
+        <span class="sr-only">Start month</span>
+        <input type="month" id="view-start" />
+      </label>
+      <label class="field-inline">
+        <span class="sr-only">Range</span>
+        <select id="view-months">
+          <option value="3">3 months</option>
+          <option value="6">6 months</option>
+          <option value="12">12 months</option>
+        </select>
+      </label>
+      <button class="icon-btn" id="theme-btn" aria-label="Toggle dark mode" title="Toggle dark / light">
+        <svg class="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+        <svg class="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>
+      </button>
+      <button class="icon-btn" id="settings-btn" aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+      <button class="btn btn-primary" id="pdf-btn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v3h16v-3"/></svg>
+        <span>Export PDF</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="kpis" id="kpis" aria-live="polite" aria-label="Summary"></section>
+
+    <div class="layout">
+      <section class="panel cal-panel" id="tab-calendar" aria-labelledby="cal-h">
+        <div class="panel-head">
+          <h2 id="cal-h">Calendar</h2>
+          <div class="legend" id="legend"></div>
+        </div>
+        <div class="periods" id="periods" aria-label="28-day FLSA work periods"></div>
+        <div class="calendar" id="calendar"></div>
+      </section>
+
+      <aside class="panel best-panel" id="tab-best" aria-labelledby="best-h">
+        <div class="panel-head">
+          <h2 id="best-h">Best days to pick up</h2>
+          <p class="hint">Ranked by what a 24-hour hireback would pay on top of what you've already planned.</p>
+        </div>
+        <div class="best-controls">
+          <label class="check"><input type="checkbox" id="f-adjacent" checked /> Hide back-to-back days</label>
+          <label class="check"><input type="checkbox" id="f-2x" /> 2x only</label>
+          <select id="f-month" aria-label="Filter by month"></select>
+        </div>
+        <div class="plan-n">
+          <span>Plan the top</span>
+          <input type="number" id="plan-n" min="1" max="60" value="5" aria-label="Number of pickups" />
+          <span>pickups</span>
+          <button class="btn btn-small" id="plan-btn">Add</button>
+        </div>
+        <ol class="best-list" id="best-list"></ol>
+        <button class="btn btn-ghost btn-block" id="best-more" hidden>Show more</button>
+      </aside>
+    </div>
+
+    <section class="panel" id="tab-paychecks" aria-labelledby="pay-h">
+      <div class="panel-head row">
+        <div>
+          <h2 id="pay-h">Estimated paychecks</h2>
+          <p class="hint" id="pay-hint"></p>
+        </div>
+        <div class="row gap">
+          <button class="btn btn-ghost" id="print-btn">Print</button>
+          <button class="btn" id="pdf-btn-2">Export PDF</button>
+        </div>
+      </div>
+      <div class="chart viz-root" id="chart"></div>
+      <div class="table-wrap">
+        <table class="pay-table" id="pay-table"></table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p><strong>Estimates only — not official payroll.</strong> Verify against your paystub; adjust rules in Settings.</p>
+    <p>Sources:
+      <a href="https://www.fairfaxcounty.gov/hr/sites/hr/files/Assets/documents/HR/CompensationPlans/FY2027/fplan.pdf" target="_blank" rel="noopener">FY2027 Pay Plan F</a> ·
+      <a href="https://www.fairfaxcounty.gov/hr/sites/hr/files/assets/documents/hr/chap4.pdf" target="_blank" rel="noopener">Personnel Regs Ch. 4</a> ·
+      <a href="https://www.fairfaxcounty.gov/hr/sites/hr/files/assets/documents/hr/chap2.pdf" target="_blank" rel="noopener">Ch. 2</a> ·
+      <a href="https://www.fairfaxcounty.gov/hr/sites/hr/files/Assets/documents/hr/collective%20bargaining/FRD_DPSC_CBA.pdf" target="_blank" rel="noopener">IAFF Local 2068 CBA (2024–2027)</a> ·
+      <a href="https://www.fairfaxcounty.gov/retirement/employee-contributions-urs" target="_blank" rel="noopener">URS contributions</a>
+    </p>
+  </footer>
+
+  <nav class="tabbar" aria-label="Sections">
+    <button data-tab="calendar">Calendar</button>
+    <button data-tab="best">Best days</button>
+    <button data-tab="paychecks">Paychecks</button>
+    <button data-open="settings">Settings</button>
+  </nav>
+
+  <div class="popover" id="popover" role="menu" hidden></div>
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="snackbar" id="snackbar" role="status" hidden></div>
+
+  <dialog class="drawer" id="settings" aria-labelledby="set-h"></dialog>
+  <dialog class="modal" id="onboarding" aria-labelledby="ob-h"></dialog>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
