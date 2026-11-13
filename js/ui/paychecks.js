@@ -117,6 +117,7 @@ export function renderTable(app, checks) {
         ${c.adjust ? `<div><span>Calibration adjustment</span><span>${c.adjust > 0 ? '+' : '−'}${money(Math.abs(c.adjust))}</span></div>` : ''}
         <h4>Period</h4>
         <div><span>Pay period</span><span>${fmtMDY(c.start)} – ${fmtMDY(c.end)}</span></div>
+        ${c.hoursCounted !== null ? `<div><span>FLSA hours on this check${c.hoursCounted !== c.hoursActual ? ` (${c.hoursActual} h in period, ${c.hoursCounted > c.hoursActual ? 'pulled' : 'slid'} ${Math.abs(c.hoursCounted - c.hoursActual)} h ${c.isSecondHalf ? (c.hoursCounted > c.hoursActual ? 'from 1st half' : 'to 1st half') : (c.hoursCounted > c.hoursActual ? 'from 2nd half' : 'to 2nd half')})` : ''}</span><span>${c.hoursCounted} h</span></div>` : ''}
         <div><span>28-day FLSA period starts</span><span>${fmtMDY(c.flsaStart)} (${c.isSecondHalf ? '2nd' : '1st'} half)</span></div>
       </div></td></tr>` : '';
     return `<tr class="main ${isOpen ? 'open' : ''}" data-k="${c.start}" tabindex="0" aria-expanded="${isOpen}">
@@ -142,5 +143,5 @@ export function renderTable(app, checks) {
   t.onclick = (e) => { const tr = e.target.closest('tr.main'); if (tr) toggle(tr); };
   t.onkeydown = (e) => { const tr = e.target.closest('tr.main'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(tr); } };
   const r = app.state.rules;
-  $('#pay-hint').textContent = `Pay date = period end + ${app.state.anchors.paydayOffset} days. Overtime is paid ${r.otTiming === 'byDate' ? 'in the pay period worked' : 'on the check after each 28-day period closes'}. Click a row for details.`;
+  $('#pay-hint').textContent = `Pay date = period end + ${app.state.anchors.paydayOffset} days. ${r.halfAdjust ? `First-half checks count ${r.halfTarget} h; the rest (and overtime) slides to the second-half check.` : `Overtime is paid ${r.otTiming === 'byDate' ? 'in the pay period worked' : 'on the check after each 28-day period closes'}.`} Click a row for details.`;
 }
