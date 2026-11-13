@@ -28,25 +28,73 @@ export function exportPdf(state, checks, range) {
   doc.text(who, 40, 58);
 
   const sum = (k) => checks.reduce((a, c) => a + c[k], 0);
-  const other = (c) => c.als + c.riding - c.lwopDed;
-  const otH = (c) => c.h1 + c.h15 + c.h2;
-  doc.autoTable({
+  const sumH = (k) => checks.reduce((a, c) => a + c.hours[k], 0);
+  const h = (n) => `${Math.round((Number(n) || 0) * 10) / 10}`;
+  const sg = (n) => (Math.abs(n) < 0.05 ? '—' : `${n > 0 ? '+' : '-'}${h(Math.abs(n))}`);
+  const per = (c) => `${fmtShort(c.start)} – ${fmtShort(c.end)}`;
+  const r = state.rules;
+  const table = (opts, leftCols = 2) => {
+    doc.autoTable({
+      styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 4, halign: 'right', textColor: [15, 23, 42] },
+      headStyles: { fillColor: [241, 243, 246], textColor: [71, 85, 105], fontStyle: 'bold', halign: 'right' },
+      footStyles: { fillColor: [226, 232, 240], textColor: [15, 23, 42], fontStyle: 'bold', halign: 'right' },
+      alternateRowStyles: { fillColor: [250, 251, 252] },
+      didParseCell: (d) => { if (d.column.index < leftCols) d.cell.styles.halign = 'left'; },
+      margin: { left: 40, right: 40 },
+      ...opts,
+    });
+  };
+  const heading = (text, y) => {
+    if (y > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); y = 40; }
+    doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(15, 23, 42).text(text, 40, y);
+    doc.setFont('helvetica', 'normal');
+    return y + 8;
+  };
+
+  // Summary — same columns as the on-screen table
+  table({
     startY: 74,
-    head: [['Pay date', 'Pay period', 'Base', 'Shift diff', 'FLSA prem.', 'Hireback', 'Holiday', 'Other', 'Gross', 'Deductions', 'Net']],
+    head: [['Pay date', 'Pay period', 'Sched. h', 'Adj. h', 'Final h', 'Base', 'Gross', 'Deductions', 'Net']],
     body: checks.map((c) => [
-      fmtMDY(c.payDate), `${fmtShort(c.start)} – ${fmtShort(c.end)}`, m(c.base), m(c.shiftDiff), m(c.schedPrem),
-      `${otH(c) ? `${otH(c)} h · ` : ''}${m(c.otPay)}`, m(c.holidayPay), m(other(c)), m(c.gross), `-${m(c.dedTotal - c.adjust)}`, m(c.net),
+      fmtMDY(c.payDate), per(c), h(c.hours.sched), sg(c.hours.adjust), h(c.hours.final),
+      m(c.base), m(c.gross), `-${m(c.dedTotal - c.adjust)}`, m(c.net),
     ]),
-    foot: [['Total', `${checks.length} checks`, m(sum('base')), m(sum('shiftDiff')), m(sum('schedPrem')), m(sum('otPay')),
-      m(sum('holidayPay')), m(checks.reduce((a, c) => a + other(c), 0)), m(sum('gross')), `-${m(sum('dedTotal') - sum('adjust'))}`, m(sum('net'))]],
-    styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 4, halign: 'right', textColor: [15, 23, 42] },
-    columnStyles: { 0: { halign: 'left' }, 1: { halign: 'left' }, 10: { fontStyle: 'bold' } },
-    headStyles: { fillColor: [241, 243, 246], textColor: [71, 85, 105], fontStyle: 'bold', halign: 'right' },
-    footStyles: { fillColor: [226, 232, 240], textColor: [15, 23, 42], fontStyle: 'bold', halign: 'right' },
-    alternateRowStyles: { fillColor: [250, 251, 252] },
-    didParseCell: (d) => { if (d.section !== 'body' && d.column.index < 2) d.cell.styles.halign = 'left'; },
-    margin: { left: 40, right: 40 },
+    foot: [['Total', `${checks.length} checks`, h(sumH('sched')), sg(sumH('adjust')), h(sumH('final')),
+      m(sum('base')), m(sum('gross')), `-${m(sum('dedTotal') - sum('adjust'))}`, m(sum('net'))]],
+    columnStyles: { 4: { fontStyle: 'bold' }, 6: { fontStyle: 'bold' }, 8: { fontStyle: 'bold' } },
   });
+
+  // Hours breakdown — scheduled → adjustments → final, and where the final hours fall
+  const anyUncounted = checks.some((c) => c.hours.leaveUncounted);
+  table({
+    startY: heading('Hours breakdown', doc.lastAutoTable.finalY + 26),
+    head: [['Pay date', 'Half', 'Sched.', 'Paid leave', 'LWOP', ...(anyUncounted ? ['Leave not counted'] : []), 'Hireback',
+      'In period', ...(r.halfAdjust ? [`Half adj. (${r.halfTarget} h)`] : []), 'Final', 'Period hours', 'Straight', `${r.m1}x tier`, `${r.m2}x tier`]],
+    body: checks.map((c) => {
+      const x = c.hours;
+      return [fmtMDY(c.payDate), c.isSecondHalf ? '2nd' : '1st', h(x.sched), h(x.leave), x.lwop ? `-${h(x.lwop)}` : '0',
+        ...(anyUncounted ? [x.leaveUncounted ? `-${h(x.leaveUncounted)}` : '0'] : []), x.pickups ? `+${h(x.pickups)}` : '0',
+        h(x.actual), ...(r.halfAdjust ? [sg(x.slide)] : []), h(x.final),
+        `${h(x.periodFrom)}–${h(x.periodTo)} of ${h(x.periodTotal)}`, h(x.straight), h(x.t15), h(x.t2)];
+    }),
+    styles: { font: 'helvetica', fontSize: 8, cellPadding: 3.5, halign: 'right', textColor: [15, 23, 42] },
+  });
+
+  // Earnings breakdown — every line item that makes up gross
+  table({
+    startY: heading('Earnings breakdown', doc.lastAutoTable.finalY + 26),
+    head: [['Pay date', 'Base', 'Shift diff', 'FLSA prem.', 'Hireback', 'Holiday', 'ALS', 'Riding', 'LWOP', 'Gross', 'Deductions', 'Calib.', 'Net']],
+    body: checks.map((c) => [
+      fmtMDY(c.payDate), m(c.base), `${m(c.shiftDiff)} (${h(c.workedSched)} h)`, m(c.schedPrem),
+      `${m(c.otPay)}${c.puHours ? ` (${[c.h2 && `${h(c.h2)}h@${r.m2}x`, c.h15 && `${h(c.h15)}h@${r.m1}x`, c.h1 && `${h(c.h1)}h@1x`].filter(Boolean).join(', ')})` : ''}`,
+      `${m(c.holidayPay)}${c.holidays.length ? ` (${c.holidays.map((x) => x.name).join(', ')})` : ''}`,
+      m(c.als), m(c.riding), c.lwopDed ? `-${m(c.lwopDed)}` : m(0), m(c.gross), `-${m(c.dedTotal)}`, c.adjust ? m(c.adjust) : '—', m(c.net),
+    ]),
+    foot: [['Total', m(sum('base')), m(sum('shiftDiff')), m(sum('schedPrem')), m(sum('otPay')), m(sum('holidayPay')), m(sum('als')),
+      m(sum('riding')), `-${m(sum('lwopDed'))}`, m(sum('gross')), `-${m(sum('dedTotal'))}`, m(sum('adjust')), m(sum('net'))]],
+    styles: { font: 'helvetica', fontSize: 7.5, cellPadding: 3, halign: 'right', textColor: [15, 23, 42] },
+    columnStyles: { 4: { cellWidth: 95 }, 5: { cellWidth: 80 } },
+  }, 1);
 
   // Deductions summary
   const dedNames = new Map();
@@ -56,6 +104,7 @@ export function exportPdf(state, checks, range) {
     doc.autoTable({
       startY: yPos,
       head: [['Deduction (range total)', 'Amount']],
+      pageBreak: 'avoid',
       body: [...dedNames].map(([n, v]) => [n, m(v)]),
       styles: { fontSize: 8.5, cellPadding: 3 },
       columnStyles: { 1: { halign: 'right' } },
@@ -65,7 +114,6 @@ export function exportPdf(state, checks, range) {
     yPos = doc.lastAutoTable.finalY + 18;
   }
 
-  const r = state.rules;
   const notes = [
     `Rates: ${PLAN_LABEL}; 24-hr hourly = annual / 2,912. OT: ${r.m1}x over ${r.t1} h and ${r.m2}x over ${r.t2} h per 28-day FLSA period.${r.halfAdjust ? ` First-half checks adjusted to ${r.halfTarget} h; the difference slides to the second-half check.` : ''}`,
     `Shift differential $${r.shiftDiff}/h on regular hours. Holidays: ${r.holidayWorked} h worked / ${r.holidayOff} h not worked. Pay date = period end + ${state.anchors.paydayOffset} days.`,
@@ -73,7 +121,11 @@ export function exportPdf(state, checks, range) {
   ];
   doc.setFontSize(8).setTextColor(100, 116, 139);
   if (yPos > doc.internal.pageSize.getHeight() - 50) { doc.addPage(); yPos = 40; }
-  notes.forEach((t, i) => doc.text(doc.splitTextToSize(t, W - 80), 40, yPos + i * 12));
+  for (const t of notes) {
+    const lines = doc.splitTextToSize(t, W - 80);
+    doc.text(lines, 40, yPos);
+    yPos += lines.length * 10 + 3;
+  }
 
   const pages = doc.getNumberOfPages();
   for (let i = 1; i <= pages; i++) {

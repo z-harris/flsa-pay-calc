@@ -94,46 +94,84 @@ function niceMax(v) {
 
 const open = new Set();
 
+const h0 = (n) => `${Math.round((Number(n) || 0) * 10) / 10}`;
+const signed = (n) => (Math.abs(n) < 0.05 ? '—' : `${n > 0 ? '+' : '−'}${h0(Math.abs(n))}`);
+const row = (label, value, cls = '') => `<div class="${cls}"><span>${label}</span><span>${value}</span></div>`;
+
+function hoursDetail(c, r) {
+  const h = c.hours;
+  const shifts = h.sched / 24;
+  const lines = [
+    row(`Scheduled shifts (${shifts} × 24 h)`, hrs(h.sched)),
+    h.worked !== h.sched ? row('&nbsp;&nbsp;worked', hrs(h.worked), 'sub') : '',
+    h.leave ? row('&nbsp;&nbsp;on paid leave', hrs(h.leave), 'sub') : '',
+    h.lwop ? row('&nbsp;&nbsp;leave without pay', hrs(h.lwop), 'sub') : '',
+    h.lwop ? row('Leave without pay (not counted)', `−${hrs(h.lwop)}`) : '',
+    h.leaveUncounted ? row('Paid leave (not counted toward OT)', `−${hrs(h.leaveUncounted)}`) : '',
+    h.pickups ? row('Hireback worked this pay period', `+${hrs(h.pickups)}`) : '',
+    row('Hours in this pay period', hrs(h.actual), 'total'),
+    r.halfAdjust ? row(`Half adjustment${c.isSecondHalf ? ` (1st half fixed at ${r.halfTarget} h)` : ` (to ${r.halfTarget} h)`}${Math.abs(h.slide) >= 0.05 ? `, ${h.slide > 0 ? 'from' : 'to'} ${c.isSecondHalf ? '1st' : '2nd'} half` : ''}`, signed(h.slide) === '—' ? '0 h' : `${signed(h.slide)} h`) : '',
+    row('Final FLSA hours on this check', hrs(h.final), 'total'),
+    row('Net adjustment vs. scheduled', `${signed(h.adjust) === '—' ? '0' : signed(h.adjust)} h`),
+  ];
+  const where = [
+    row('Period hours covered by this check', `${h0(h.periodFrom)}–${h0(h.periodTo)} of ${h0(h.periodTotal)} h`),
+    row(`Straight time (up to ${r.t1} h)`, hrs(h.straight)),
+    row(`${r.m1}x tier (${r.t1}–${r.t2} h)`, hrs(h.t15)),
+    row(`${r.m2}x tier (over ${r.t2} h)`, hrs(h.t2)),
+    row('Worked hours paid shift diff on this check', hrs(h.paidWorked)),
+    row('Hireback hours paid on this check', hrs(h.paidPickups)),
+  ];
+  return [sect('Hours', lines.join('')), sect('Where the hours fall', where.join(''))].join('');
+}
+const sect = (title, body) => `<section><h4>${title}</h4>${body}</section>`;
+
 export function renderTable(app, checks) {
   const t = $('#pay-table');
+  const r = app.state.rules;
   const tot = (k) => checks.reduce((a, c) => a + c[k], 0);
-  const other = (c) => c.als + c.riding - c.lwopDed;
-  const otH = (c) => c.h1 + c.h15 + c.h2;
-  const rows = checks.map((c, i) => {
+  const totH = (k) => checks.reduce((a, c) => a + c.hours[k], 0);
+  const COLS = 9;
+  const rows = checks.map((c) => {
     const isOpen = open.has(c.start);
-    const detail = isOpen ? `<tr class="detail"><td colspan="11"><div class="detail-grid">
-        <h4>Earnings</h4>
-        <div><span>Base biweekly (${money(c.rate.annual)}/yr)</span><span>${money(c.base)}</span></div>
-        <div><span>Shift differential (${c.workedSched} h worked)</span><span>${money(c.shiftDiff)}</span></div>
-        <div><span>FLSA premium, scheduled hours</span><span>${money(c.schedPrem)}</span></div>
-        <div><span>Hireback ${c.h2 ? `${c.h2} h @2x ` : ''}${c.h15 ? `${c.h15} h @1.5x ` : ''}${c.h1 ? `${c.h1} h @1x` : ''}</span><span>${money(c.otPay)}</span></div>
-        ${c.holidays.map((h) => `<div><span>Holiday: ${esc(h.name)} (${h.hours} h${h.worked ? ', worked' : ''})</span><span>${money(h.hours * c.rate.h3)}</span></div>`).join('')}
-        ${c.als ? `<div><span>ALS paramedic premium</span><span>${money(c.als)}</span></div>` : ''}
-        ${c.riding ? `<div><span>Riding pay</span><span>${money(c.riding)}</span></div>` : ''}
-        ${c.lwopDed ? `<div><span>Leave without pay (${c.lwopH} h)</span><span>−${money(c.lwopDed)}</span></div>` : ''}
-        ${c.leaveH ? `<div><span>Paid leave used</span><span>${c.leaveH} h</span></div>` : ''}
-        <h4>Deductions</h4>
-        ${c.deds.map((d) => `<div><span>${esc(d.name)}</span><span>−${money(d.amount)}</span></div>`).join('') || '<div><span>None set — add them in Settings</span><span></span></div>'}
-        ${c.adjust ? `<div><span>Calibration adjustment</span><span>${c.adjust > 0 ? '+' : '−'}${money(Math.abs(c.adjust))}</span></div>` : ''}
-        <h4>Period</h4>
-        <div><span>Pay period</span><span>${fmtMDY(c.start)} – ${fmtMDY(c.end)}</span></div>
-        ${c.hoursCounted !== null ? `<div><span>FLSA hours on this check${c.hoursCounted !== c.hoursActual ? ` (${c.hoursActual} h in period, ${c.hoursCounted > c.hoursActual ? 'pulled' : 'slid'} ${Math.abs(c.hoursCounted - c.hoursActual)} h ${c.isSecondHalf ? (c.hoursCounted > c.hoursActual ? 'from 1st half' : 'to 1st half') : (c.hoursCounted > c.hoursActual ? 'from 2nd half' : 'to 2nd half')})` : ''}</span><span>${c.hoursCounted} h</span></div>` : ''}
-        <div><span>28-day FLSA period starts</span><span>${fmtMDY(c.flsaStart)} (${c.isSecondHalf ? '2nd' : '1st'} half)</span></div>
+    const detail = isOpen ? `<tr class="detail"><td colspan="${COLS}"><div class="detail-grid">
+        ${hoursDetail(c, r)}
+        ${sect('Earnings', `
+        ${row(`Base biweekly (${money(c.rate.annual)}/yr · ${money(c.rate.h3)}/h)`, money(c.base))}
+        ${row(`Shift differential (${hrs(c.workedSched)} × ${money(r.shiftDiffOn ? r.shiftDiff : 0)})`, money(c.shiftDiff))}
+        ${row('FLSA premium, scheduled hours', money(c.schedPrem))}
+        ${row(`Hireback${c.h2 ? ` · ${h0(c.h2)} h @${r.m2}x` : ''}${c.h15 ? ` · ${h0(c.h15)} h @${r.m1}x` : ''}${c.h1 ? ` · ${h0(c.h1)} h @1x` : ''}`, money(c.otPay))}
+        ${c.holidays.map((hl) => row(`Holiday: ${esc(hl.name)} (${hl.hours} h${hl.worked ? ', worked' : ''})`, money(hl.hours * c.rate.h3))).join('') || row('Holiday pay', money(0))}
+        ${row(`ALS paramedic premium${app.state.profile.paramedic ? '' : ' (off)'}`, money(c.als))}
+        ${row('Riding pay', money(c.riding))}
+        ${row(`Leave without pay (${hrs(c.lwopH)})`, c.lwopDed ? `−${money(c.lwopDed)}` : money(0))}
+        ${row('Gross', money(c.gross), 'total')}`)}
+        ${sect('Deductions & net', `
+        ${c.deds.map((d) => row(esc(d.name), `−${money(d.amount)}`)).join('') || row('None set — add them in Settings', '')}
+        ${c.adjust ? row('Calibration adjustment', `${c.adjust > 0 ? '+' : '−'}${money(Math.abs(c.adjust))}`) : ''}
+        ${row('Total deductions', `−${money(c.dedTotal - c.adjust)}`, 'total')}
+        ${row('Net (take-home)', money(c.net), 'total')}`)}
+        ${sect('Period', `
+        ${row('Pay period', `${fmtMDY(c.start)} – ${fmtMDY(c.end)}`)}
+        ${row('Pay date', fmtMDY(c.payDate))}
+        ${row('28-day FLSA period starts', fmtMDY(c.flsaStart))}
+        ${row('This check covers', `${c.isSecondHalf ? '2nd' : '1st'} half`)}`)}
       </div></td></tr>` : '';
+    const h = c.hours;
     return `<tr class="main ${isOpen ? 'open' : ''}" data-k="${c.start}" tabindex="0" aria-expanded="${isOpen}">
       <td><span class="caret">▸</span>${fmtMDY(c.payDate)}</td>
       <td>${fmtShort(c.start)} – ${fmtShort(c.end)}</td>
-      <td>${money(c.base)}</td><td>${money(c.shiftDiff)}</td><td>${money(c.schedPrem)}</td>
-      <td class="${c.otPay ? 'ot' : ''}">${otH(c) ? `${otH(c)} h · ` : ''}${money(c.otPay)}</td>
-      <td>${money(c.holidayPay)}</td><td>${money(other(c))}</td>
+      <td>${h0(h.sched)}</td>
+      <td class="${h.adjust > 0 ? 'adj-up' : h.adjust < 0 ? 'adj-down' : ''}" title="LWOP, hireback${r.halfAdjust ? ' and first-half adjustment' : ''}">${signed(h.adjust)}</td>
+      <td><strong>${h0(h.final)}</strong></td>
+      <td>${money(c.base)}</td>
       <td><strong>${money(c.gross)}</strong></td><td>−${money(c.dedTotal - c.adjust)}</td><td class="net">${money(c.net)}</td>
     </tr>${detail}`;
   }).join('');
-  t.innerHTML = `<thead><tr><th>Pay date</th><th>Pay period</th><th>Base</th><th>Shift diff</th><th>FLSA prem.</th><th>Hireback</th><th>Holiday</th><th>Other</th><th>Gross</th><th>Deductions</th><th>Net</th></tr></thead>
+  t.innerHTML = `<thead><tr><th>Pay date</th><th>Pay period</th><th>Sched. h</th><th>Adj. h</th><th>Final h</th><th>Base</th><th>Gross</th><th>Deductions</th><th>Net</th></tr></thead>
     <tbody>${rows}</tbody>
-    <tfoot><tr><td>Total</td><td>${checks.length} checks</td><td>${money(tot('base'))}</td><td>${money(tot('shiftDiff'))}</td><td>${money(tot('schedPrem'))}</td>
-    <td>${money(tot('otPay'))}</td><td>${money(tot('holidayPay'))}</td><td>${money(checks.reduce((a, c) => a + other(c), 0))}</td>
-    <td>${money(tot('gross'))}</td><td>−${money(tot('dedTotal') - tot('adjust'))}</td><td class="net">${money(tot('net'))}</td></tr></tfoot>`;
+    <tfoot><tr><td>Total</td><td>${checks.length} checks</td><td>${h0(totH('sched'))}</td><td>${signed(totH('adjust'))}</td><td>${h0(totH('final'))}</td>
+    <td>${money(tot('base'))}</td><td>${money(tot('gross'))}</td><td>−${money(tot('dedTotal') - tot('adjust'))}</td><td class="net">${money(tot('net'))}</td></tr></tfoot>`;
   const toggle = (tr) => {
     const k = tr.dataset.k;
     if (open.has(k)) open.delete(k); else open.add(k);
@@ -142,6 +180,5 @@ export function renderTable(app, checks) {
   };
   t.onclick = (e) => { const tr = e.target.closest('tr.main'); if (tr) toggle(tr); };
   t.onkeydown = (e) => { const tr = e.target.closest('tr.main'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(tr); } };
-  const r = app.state.rules;
-  $('#pay-hint').textContent = `Pay date = period end + ${app.state.anchors.paydayOffset} days. ${r.halfAdjust ? `First-half checks count ${r.halfTarget} h; the rest (and overtime) slides to the second-half check.` : `Overtime is paid ${r.otTiming === 'byDate' ? 'in the pay period worked' : 'on the check after each 28-day period closes'}.`} Click a row for details.`;
+  $('#pay-hint').textContent = `Pay date = period end + ${app.state.anchors.paydayOffset} days. ${r.halfAdjust ? `First-half checks count ${r.halfTarget} h; the rest (and overtime) slides to the second-half check.` : `Overtime is paid ${r.otTiming === 'byDate' ? 'in the pay period worked' : 'on the check after each 28-day period closes'}.`} Adj. h = leave without pay, hireback${r.halfAdjust ? ' and the first-half adjustment' : ''}. Click a row for the full breakdown.`;
 }

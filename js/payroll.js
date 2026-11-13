@@ -259,6 +259,11 @@ export function paycheck(ctx, ppStart) {
   let schedPrem = 0, otPay = 0, h15 = 0, h2 = 0, h1 = 0;
   let hoursCounted = null, hoursActual = null;
   const end = addDays(ppStart, 13);
+  // Hour ledger for this check: scheduled → adjustments → final FLSA hours.
+  const schedH = workedSched + leaveH + lwopH;
+  const leaveUncounted = r.leaveCounts ? 0 : leaveH;
+  const dated = { worked: workedSched, pickups: puHours };
+  const actualH = schedH - lwopH - leaveUncounted + puHours;
   if (r.halfAdjust) {
     const hv = halfSplit(ctx, ppStart)[isSecondHalf ? 1 : 0];
     ({ shiftDiff, riding, schedPrem, otPay, h1, h15, h2, workedSched, puHours } = hv);
@@ -270,6 +275,21 @@ export function paycheck(ctx, ppStart) {
     schedPrem = fp.schedPremium;
     for (const pu of fp.pickups) { otPay += pu.pay; h1 += pu.h1; h15 += pu.h15; h2 += pu.h2; }
   }
+
+  const finalH = hoursCounted ?? actualH;
+  const slide = hoursCounted === null ? 0 : hoursCounted - actualH;
+  // Where this check's final hours sit in the 28-day period, and which tiers they fall in.
+  const firstFinal = r.halfAdjust ? halfSplit(ctx, ppStart)[0].hours
+    : (isSecondHalf ? paycheckHoursActual(ctx, fp.start) : actualH);
+  const from = isSecondHalf ? firstFinal : 0;
+  const tiers = splitTiers(from, from + finalH, r);
+  const hours = {
+    sched: schedH, worked: dated.worked, leave: leaveH, lwop: lwopH, leaveUncounted, pickups: dated.pickups,
+    actual: actualH, slide, adjust: finalH - schedH, final: finalH,
+    periodFrom: from, periodTo: from + finalH, periodTotal: fp.counted,
+    straight: tiers.h1, t15: tiers.h15, t2: tiers.h2,
+    paidWorked: workedSched, paidPickups: puHours,
+  };
 
   const gross = base - lwopDed + shiftDiff + holidayPay + riding + als + schedPrem + otPay;
   const baseNet = base - lwopDed;
@@ -286,9 +306,22 @@ export function paycheck(ctx, ppStart) {
     flsaStart: fp.start, isSecondHalf,
     rate, base: r2(base), lwopDed: r2(lwopDed), shiftDiff: r2(shiftDiff), holidayPay: r2(holidayPay), holidays,
     riding: r2(riding), als: r2(als), schedPrem: r2(schedPrem), otPay: r2(otPay), h1: r2(h1), h15: r2(h15), h2: r2(h2),
-    workedSched, leaveH, lwopH, puHours, hoursCounted, hoursActual,
+    workedSched, leaveH, lwopH, puHours, hoursCounted, hoursActual, hours,
     gross: r2(gross), deds, dedTotal: r2(dedTotal), adjust: r2(adjust), netRaw: r2(netRaw), net: r2(netRaw + adjust),
   };
+}
+
+/** Counted FLSA hours actually dated in the 14 days starting `ppStart` (no half adjustment). */
+function paycheckHoursActual(ctx, ppStart) {
+  const r = ctx.state.rules;
+  let h = 0;
+  for (let i = 0; i < 14; i++) {
+    const st = dayStatus(ctx, addDays(ppStart, i));
+    if (st.kind === 'WORK') h += 24;
+    else if (st.mine && st.kind !== 'LWOP' && r.leaveCounts) h += 24;
+    else if (st.kind === 'PU') h += Math.max(0, Number(st.entry.hours) || 24);
+  }
+  return h;
 }
 
 /** Paychecks for every pay period that overlaps [from, to]. */

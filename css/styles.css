@@ -284,9 +284,15 @@ body[data-shift="C"] { --mine: var(--c); --mine-bg: var(--c-bg); }
 .pay-table tfoot td { position: sticky; bottom: 0; background: var(--surface-3); font-weight: 750; border-bottom: 0; }
 .pay-table .net { font-weight: 750; }
 .pay-table .ot { color: var(--t2-ink); font-weight: 650; }
-.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 24px; padding: 4px 0; }
+.pay-table .adj-up { color: var(--t2-ink); font-weight: 650; }
+.pay-table .adj-down { color: var(--muted); font-weight: 650; }
+.detail-grid div.sub { color: var(--muted); font-size: .8rem; }
+.detail-grid div.total { font-weight: 700; border-top: 1px solid var(--border); padding-top: 2px; }
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px 32px; padding: 4px 0; align-items: start; }
+.detail-grid section { display: flex; flex-direction: column; gap: 3px; }
 .detail-grid div { display: flex; justify-content: space-between; gap: 12px; }
-.detail-grid h4 { margin: 6px 0 2px; font-size: .78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; grid-column: 1 / -1; }
+.detail-grid div > span:last-child { white-space: nowrap; text-align: right; }
+.detail-grid h4 { margin: 6px 0 2px; font-size: .78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .caret { display: inline-block; transition: transform .15s; color: var(--muted); margin-right: 4px; }
 tr.open .caret { transform: rotate(90deg); }
 

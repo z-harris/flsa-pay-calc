@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FLSA Planner — math tests</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 24px; }
+  .pass { color: #15803d; } .fail { color: #b91c1c; font-weight: 700; }
+  #summary { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div id="summary">Running…</div>
+<ol id="out"></ol>
+<script type="module">
+import { lookup, parseGradeStep } from './js/payPlan.js';
+import { shiftOn, holidaysForYear, payPeriodStart } from './js/schedule.js';
+import { DEFAULT_STATE, makeCtx, flsaPeriod, marginal, paycheck, bestDays, halfSplit } from './js/payroll.js';
+
+const out = document.getElementById('out');
+let pass = 0, fail = 0;
+function t(name, actual, expected) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  ok ? pass++ : fail++;
+  out.insertAdjacentHTML('beforeend', `<li class="${ok ? 'pass' : 'fail'}">${ok ? '✓' : '✗'} ${name}${ok ? '' : ` — got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`}</li>`);
+}
+const r2 = (n) => Math.round(n * 100) / 100;
+
+// Pay plan (FY2027 Pay Plan F, county PDF)
+const f181 = lookup('F18', 1);
+t('F18-1 hourly (H3) = $24.3403', f181.h3, 24.3403);
+t('F18-1 biweekly = $2,726.11', f181.biweekly, 2726.11);
+t('F18-1 40-hr hourly = $34.0764', f181.hourly40, 34.0764);
+t('F23-26 H3 = $54.1102', lookup('F23', 26).h3, 54.1102);
+t('F33-1 H3 = $47.5402', lookup('F33', 1).h3, 47.5402);
+t('parse "18-1"', parseGradeStep('18-1'), { grade: 'F18', step: 1 });
+t('parse "F23 step 4"', parseGradeStep('F23 step 4'), { grade: 'F23', step: 4 });
+t('parse invalid "22-1"', parseGradeStep('22-1'), null);
+
+// Rotation (user anchors: Jan 5 A, Jan 6 B, Jan 7 C, Jan 8 B, 2026)
+t('Jan 5–8 2026 = A B C B', ['05', '06', '07', '08'].map((d) => shiftOn(`2026-01-${d}`)).join(''), 'ABCB');
+t('A works Jan 1/3/5/10/12/14', ['01', '03', '05', '10', '12', '14'].every((d) => shiftOn(`2026-01-${d}`) === 'A'), true);
+t('Each 9-day cycle: 3 shifts each', ['A', 'B', 'C'].map((s) => [...Array(9)].filter((_, i) => shiftOn(`2026-03-${String(i + 1).padStart(2, '0')}`) === s).length), [3, 3, 3]);
+
+// Holidays (CBA Art. 51)
+const h26 = holidaysForYear(2026).map((h) => h.date);
+t('2026 has 13 holidays (no inauguration)', h26.length, 13);
+t('Election Day 2026 = Nov 3', h26.includes('2026-11-03'), true);
+t('Thanksgiving 2026 = Nov 26', h26.includes('2026-11-26'), true);
+t('Inauguration Day 2029 (Sat) not observed', holidaysForYear(2029).some((h) => h.name === 'Inauguration Day'), false);
+t('Inauguration Day 2033 (Thu) observed', holidaysForYear(2033).some((h) => h.name === 'Inauguration Day'), true);
+
+// Periods
+t('Pay period containing 2026-07-20 starts 7/11', payPeriodStart('2026-07-20', '2026-07-11'), '2026-07-11');
+t('Pay period anchor aligns with 1991-07-13 example', payPeriodStart('1991-07-13', '2026-07-11'), '1991-07-13');
+
+// FLSA tiers, A shift
+const s = DEFAULT_STATE();
+let ctx = makeCtx(s);
+t('A shift FLSA hours 7/11, 8/8, 9/5, 10/3', ['2026-07-11', '2026-08-08', '2026-09-05', '2026-10-03'].map((d) => flsaPeriod(ctx, d).sched), [240, 216, 240, 216]);
+const rate = 24.3403 + 0.7275;
+t('Pickup in 216-h period = 1.5x', marginal(ctx, '2026-08-10').tier, '1.5x');
+t('Pickup in 216-h period pays 24×1.5×(H3+diff)', r2(marginal(ctx, '2026-08-10').pay), r2(24 * 1.5 * rate));
+t('Pickup in 240-h period = 2x', marginal(ctx, '2026-07-13').tier, '2x');
+t('Pickup in 240-h period pays 24×2×(H3+diff)', r2(marginal(ctx, '2026-07-13').pay), r2(48 * rate));
+t('216-h period: FLSA premium on 4 h × 0.5', r2(flsaPeriod(ctx, '2026-08-08').schedPremium), r2(4 * 0.5 * rate));
+t('240-h period: FLSA premium on 28 h × 0.5', r2(flsaPeriod(ctx, '2026-07-11').schedPremium), r2(28 * 0.5 * rate));
+
+// After one pickup in a 216-h period, the next one is 2x
+s.days['2026-08-10'] = { type: 'PU', hours: 24 };
+ctx = makeCtx(s);
+t('Second pickup in that period becomes 2x', marginal(ctx, '2026-08-12').tier, '2x');
+
+// LWOP drops hours and the rate
+const s2 = DEFAULT_STATE();
+const own = ['2026-07-11', '2026-07-12', '2026-07-13', '2026-07-14'].find((d) => shiftOn(d) === 'A');
+s2.days[own] = { type: 'LWOP', hours: 24 };
+const c2 = makeCtx(s2);
+t('LWOP in 240-h period → pickup only 1.5x', marginal(c2, '2026-07-20').tier, '1.5x');
+t('LWOP deducted from base pay', paycheck(c2, '2026-07-11').lwopDed, r2(24 * 24.3403));
+
+// Annual leave counts toward thresholds (Regs) → no change in tier
+const s3 = DEFAULT_STATE();
+s3.days[own] = { type: 'AL', hours: 24 };
+t('Annual leave keeps 240 h counted', flsaPeriod(makeCtx(s3), '2026-07-11').counted, 240);
+
+// Deductions
+const s4 = DEFAULT_STATE();
+s4.deductions = [{ id: 'x', name: 'Pension', type: 'pctBase', value: 10, on: true }, { id: 'y', name: 'Fixed', type: 'fixed', value: 50, on: true }];
+const pc = paycheck(makeCtx(s4), '2026-08-08');
+t('Deductions: 10% of base + $50', pc.dedTotal, r2(2726.11 * 0.1 + 50));
+
+// First-half adjustment to 106 h (default on)
+{
+  const sa = DEFAULT_STATE(); sa.deductions = [];
+  const ca = makeCtx(sa);
+  const fp = flsaPeriod(ca, '2026-07-11');
+  const [a, b] = [paycheck(ca, '2026-07-11'), paycheck(ca, '2026-07-25')];
+  t('Half adjust: 1st check counts 106 h', a.hoursCounted, 106);
+  t('Half adjust: 2nd check counts the rest', b.hoursCounted, fp.counted - 106);
+  t('Half adjust: actual hours sum to period', a.hoursActual + b.hoursActual, fp.counted);
+  t('Half adjust: all FLSA premium on 2nd check', [a.schedPrem, b.schedPrem], [0, r2(fp.schedPremium)]);
+  t('Half adjust: shift diff follows hours', [a.shiftDiff, b.shiftDiff], [r2(106 * 0.7275), r2((fp.counted - 106) * 0.7275)]);
+  // Pickup in the 1st half of a period: its hours beyond 106 slide to the 2nd check, total pay unchanged
+  const pu = '2026-07-16'; // C-shift day (A is off)
+  sa.days[pu] = { type: 'PU', hours: 24 };
+  const cb = makeCtx(sa);
+  const fp2 = flsaPeriod(cb, pu);
+  const [a2, b2] = [paycheck(cb, '2026-07-11'), paycheck(cb, '2026-07-25')];
+  t('Half adjust: hireback pay total preserved', r2(a2.otPay + b2.otPay), r2(fp2.pickups[0].pay));
+  t('Half adjust: gross total matches unadjusted (±1¢ rounding)', (() => {
+    const so = JSON.parse(JSON.stringify(sa)); so.rules.halfAdjust = false;
+    const co = makeCtx(so);
+    return Math.abs(a2.gross + b2.gross - paycheck(co, '2026-07-11').gross - paycheck(co, '2026-07-25').gross) <= 0.02;
+  })(), true);
+  t('Half adjust: 2x hireback slides to 2nd check', [a2.otPay, b2.otPay], [0, r2(fp2.pickups[0].pay)]);
+  t('Half adjust: halves cover all hours', halfSplit(cb, pu).reduce((x, h) => x + h.hours, 0), fp2.counted);
+  // Setting removed → previous behavior
+  sa.rules.halfAdjust = false;
+  t('Half adjust off: no hoursCounted', paycheck(makeCtx(sa), '2026-07-11').hoursCounted, null);
+}
+
+// Best days excludes own shift days
+t('Best days never lists own-shift days', bestDays(makeCtx(DEFAULT_STATE()), '2026-08-08', '2026-09-30').every((d) => shiftOn(d.date) !== 'A'), true);
+
+document.getElementById('summary').innerHTML = `<span class="${fail ? 'fail' : 'pass'}">${pass} passed, ${fail} failed</span>`;
+document.title = `${fail ? 'FAIL' : 'PASS'} ${pass}/${pass + fail}`;
+</script>
+</body>
+</html>
