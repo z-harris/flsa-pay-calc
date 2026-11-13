@@ -30,7 +30,8 @@ export const DEFAULT_STATE = () => ({
     scheduledPremium: true,        // FLSA premium on scheduled hours above 212 (verify against stub)
     shiftDiffOn: true, shiftDiff: 0.7275, // CBA §75.5A
     holidayWorked: 16, holidayOff: 11.2,  // 11.2 = 0.1 × 112 biweekly hrs (Regs §4.12-3a); 16 user-reported
-    otTiming: 'periodEnd',         // 'periodEnd' | 'byDate'
+    otTiming: 'periodEnd',         // 'periodEnd' | 'byDate' (ignored while halfAdjust is on)
+    halfAdjust: true, halfTarget: 106, // post-hoc: 1st-half check counts exactly halfTarget h; the difference slides to the 2nd half
   },
   anchors: { payPeriod: '2026-07-11', flsaOffset: 0, paydayOffset: 7 },
   days: {},                // ISO → { type: 'AL'|'SL'|'CL'|'LWOP'|'PU', hours }
@@ -140,6 +141,57 @@ export function flsaPeriod(ctx, iso) {
   return period;
 }
 
+/**
+ * Post-hoc half adjustment: the first-half check is credited with exactly `halfTarget` counted
+ * hours (fewer only if the whole period has fewer); the second-half check gets the rest.
+ * Hours stack the same way the FLSA tiers do — scheduled/leave hours in date order, then hireback —
+ * so the first check is filled with regular hours and everything past it (hireback, FLSA premium)
+ * slides to the second check. Each hour carries its pay; period totals are unchanged.
+ */
+export function halfSplit(ctx, iso) {
+  const fp = flsaPeriod(ctx, iso);
+  if (fp.halves) return fp.halves;
+  const s = ctx.state, r = s.rules;
+  const diff = r.shiftDiffOn ? r.shiftDiff : 0;
+  const riding = s.profile.ridingRate || 0;
+  const base = []; // chronological scheduled hours that count toward the thresholds
+  const actual = [0, 0];
+  for (let i = 0; i < 28; i++) {
+    const st = dayStatus(ctx, addDays(fp.start, i));
+    const work = st.kind === 'WORK', leave = st.mine && !work && st.kind !== 'LWOP' && r.leaveCounts;
+    if (work || leave) { base.push(work); actual[i < 14 ? 0 : 1] += 24; }
+  }
+  for (const pu of fp.pickups) actual[dayNum(pu.date) - dayNum(fp.start) < 14 ? 0 : 1] += pu.hours;
+  const total = fp.counted;
+  const cut = Math.max(0, Math.min(Number(r.halfTarget) || 0, total));
+  const halves = [0, 1].map((h) => ({ hours: h ? total - cut : cut, actual: actual[h], workedSched: 0, puHours: 0, shiftDiff: 0, riding: 0, otPay: 0, h1: 0, h15: 0, h2: 0, schedPrem: 0 }));
+  const band = (a, b) => [Math.max(0, Math.min(b, cut) - a), Math.max(0, b - Math.max(a, cut))]; // [in 1st, in 2nd]
+  base.forEach((work, k) => {
+    if (!work) return;
+    band(k * 24, k * 24 + 24).forEach((n, h) => { halves[h].workedSched += n; halves[h].shiftDiff += n * diff; halves[h].riding += n * riding; });
+  });
+  const rate = fp.rate;
+  let pos = fp.baseCounted;
+  for (const pu of fp.pickups) {
+    const lo = pos, hi = pos + pu.hours, mid = Math.min(hi, Math.max(lo, cut));
+    [[lo, mid], [mid, hi]].forEach(([a, b], h) => {
+      if (b <= a) return;
+      const t = splitTiers(a, b, r), o = halves[h];
+      o.puHours += b - a; o.riding += (b - a) * riding;
+      o.h1 += t.h1; o.h15 += t.h15; o.h2 += t.h2;
+      o.otPay += (t.h1 + t.h15 * r.m1 + t.h2 * r.m2) * rate;
+    });
+    pos = hi;
+  }
+  // Scheduled FLSA premium sits on base positions [t1, baseCounted); split it at the cut.
+  const over = Math.max(0, fp.baseCounted - r.t1);
+  const inFirst = Math.max(0, Math.min(cut, fp.baseCounted) - r.t1);
+  halves[0].schedPrem = over ? fp.schedPremium * inFirst / over : 0;
+  halves[1].schedPrem = fp.schedPremium - halves[0].schedPrem;
+  fp.halves = halves;
+  return halves;
+}
+
 /** Value of adding `hours` of hireback on top of the period's current total. */
 export function marginal(ctx, iso, hours = 24) {
   const r = ctx.state.rules;
@@ -197,16 +249,21 @@ export function paycheck(ctx, ppStart) {
   }
   const base = rate.biweekly;
   const lwopDed = lwopH * rate.h3;
-  const shiftDiff = r.shiftDiffOn ? workedSched * r.shiftDiff : 0;
-  const riding = (p.ridingRate || 0) * (workedSched + puHours);
+  let shiftDiff = r.shiftDiffOn ? workedSched * r.shiftDiff : 0;
+  let riding = (p.ridingRate || 0) * (workedSched + puHours);
   const als = p.paramedic ? base * (p.alsPct || 0) / 100 : 0;
 
   // Overtime attribution from the FLSA period(s) touching this pay period.
   const fp = flsaPeriod(ctx, ppStart);
   const isSecondHalf = dayNum(ppStart) - dayNum(fp.start) === 14;
   let schedPrem = 0, otPay = 0, h15 = 0, h2 = 0, h1 = 0;
+  let hoursCounted = null, hoursActual = null;
   const end = addDays(ppStart, 13);
-  if (r.otTiming === 'byDate') {
+  if (r.halfAdjust) {
+    const hv = halfSplit(ctx, ppStart)[isSecondHalf ? 1 : 0];
+    ({ shiftDiff, riding, schedPrem, otPay, h1, h15, h2, workedSched, puHours } = hv);
+    hoursCounted = hv.hours; hoursActual = hv.actual;
+  } else if (r.otTiming === 'byDate') {
     schedPrem = fp.schedPremium / 2;
     for (const pu of fp.pickups) if (pu.date >= ppStart && pu.date <= end) { otPay += pu.pay; h1 += pu.h1; h15 += pu.h15; h2 += pu.h2; }
   } else if (isSecondHalf) {
@@ -228,8 +285,8 @@ export function paycheck(ctx, ppStart) {
     start: ppStart, end, payDate: addDays(end, Number(s.anchors.paydayOffset) || 0),
     flsaStart: fp.start, isSecondHalf,
     rate, base: r2(base), lwopDed: r2(lwopDed), shiftDiff: r2(shiftDiff), holidayPay: r2(holidayPay), holidays,
-    riding: r2(riding), als: r2(als), schedPrem: r2(schedPrem), otPay: r2(otPay), h1, h15, h2,
-    workedSched, leaveH, lwopH, puHours,
+    riding: r2(riding), als: r2(als), schedPrem: r2(schedPrem), otPay: r2(otPay), h1: r2(h1), h15: r2(h15), h2: r2(h2),
+    workedSched, leaveH, lwopH, puHours, hoursCounted, hoursActual,
     gross: r2(gross), deds, dedTotal: r2(dedTotal), adjust: r2(adjust), netRaw: r2(netRaw), net: r2(netRaw + adjust),
   };
 }
