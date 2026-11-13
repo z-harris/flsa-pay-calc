@@ -67,7 +67,7 @@ export function exportPdf(state, checks, range) {
 
   const r = state.rules;
   const notes = [
-    `Rates: ${PLAN_LABEL}; 24-hr hourly = annual / 2,912. OT: ${r.m1}x over ${r.t1} h and ${r.m2}x over ${r.t2} h per 28-day FLSA period.`,
+    `Rates: ${PLAN_LABEL}; 24-hr hourly = annual / 2,912. OT: ${r.m1}x over ${r.t1} h and ${r.m2}x over ${r.t2} h per 28-day FLSA period.${r.halfAdjust ? ` First-half checks adjusted to ${r.halfTarget} h; the difference slides to the second-half check.` : ''}`,
     `Shift differential $${r.shiftDiff}/h on regular hours. Holidays: ${r.holidayWorked} h worked / ${r.holidayOff} h not worked. Pay date = period end + ${state.anchors.paydayOffset} days.`,
     'ESTIMATES ONLY — not official payroll. Sources: Fairfax County FY2027 Pay Plan F; Personnel Regulations Ch. 2 & 4; IAFF Local 2068 CBA (2024–2027).',
   ];
