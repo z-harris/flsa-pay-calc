@@ -68,7 +68,9 @@ export function renderSettings(app) {
       <div class="full">${chk('rules.scheduledPremium', r.scheduledPremium, 'Pay FLSA premium on scheduled hours over the threshold')} ${WARN}</div>
       ${f('When overtime is paid', `<select data-bind="rules.otTiming" data-type="str">
           <option value="periodEnd" ${r.otTiming === 'periodEnd' ? 'selected' : ''}>After the 28-day period closes</option>
-          <option value="byDate" ${r.otTiming === 'byDate' ? 'selected' : ''}>In the pay period worked</option></select>`, { badge: WARN, full: true })}
+          <option value="byDate" ${r.otTiming === 'byDate' ? 'selected' : ''}>In the pay period worked</option></select>`, { badge: WARN, full: true, hint: r.halfAdjust ? 'Not used while the first-half hour adjustment below is on.' : '' })}
+      <div class="full">${chk('rules.halfAdjust', r.halfAdjust, 'Adjust each first-half check to a fixed number of hours')}</div>
+      ${f('First-half hours', num('rules.halfTarget', r.halfTarget, 'step="0.5" min="0"'), { hint: 'Hours over/under this slide into the second-half check, carrying shift diff, hireback and FLSA premium with them' })}
     </div>`),
     sec('hol', 'Holidays', `<div class="fgrid">
       ${f('Holiday worked (h)', num('rules.holidayWorked', r.holidayWorked, 'step="0.1"'), { badge: WARN })}
@@ -150,7 +152,7 @@ function bind(app, dlg) {
       if (type === 'numOrNull') v = t.value === '' ? null : Number(t.value);
       if (getPath(app.state, t.dataset.bind) === v) return;
       app.commit((s) => setPath(s, t.dataset.bind, v), { quiet: true });
-      if (['profile.grade', 'profile.step', 'anchors.payPeriod'].includes(t.dataset.bind)) rerender(app);
+      if (['profile.grade', 'profile.step', 'anchors.payPeriod', 'rules.halfAdjust'].includes(t.dataset.bind)) rerender(app);
       else $('#pay-preview').innerHTML = payPreview(app.state);
     } else if (t.dataset.ded !== undefined) {
       const i = +t.dataset.ded, fld = t.dataset.field;
