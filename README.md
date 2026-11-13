@@ -30,6 +30,7 @@ Math tests: open `/tests.html`.
 | Pay period / FLSA work period | 14 days / 28 days, starting Saturday | Regs Ch. 2 |
 | OT 1.5x | hours worked + paid leave over 212 per 28 days | Regs §4.12 |
 | OT 2x | over 240 h per 28 days | **user-reported — verify** |
+| First-half check | adjusted to 106 h; the difference (and the OT, hireback and shift diff riding on it) slides to the second-half check — on/off + target in Settings → Overtime rules | user-reported |
 | Shift differential | $0.7275/h on regular hours (not OT); included in the OT regular rate | CBA §75.5A; Regs Ch. 2 |
 | Holidays | 11.2 h not worked (0.1 × 112) / 16 h worked (**verify**) | Regs §4.12-3; CBA Art. 51 list |
 | Paramedic / riding pay | 10% of base / $2–3 per hour (optional) | CBA §75.2–75.3 |
